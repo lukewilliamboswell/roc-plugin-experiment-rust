@@ -1,9 +1,9 @@
 platform "example-plugin"
-    requires {} { main : Str }
+    requires {} { main : U64 -> Str }
     exposes []
     packages {}
     imports []
     provides [mainForHost]
 
-mainForHost : Str
-mainForHost = main
+mainForHost : U64 -> Str
+mainForHost = \x -> main x

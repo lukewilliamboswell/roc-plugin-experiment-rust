@@ -2,26 +2,6 @@ use core::ffi::c_void;
 use libloading::Library;
 use roc_std::RocStr;
 
-#[no_mangle]
-pub unsafe extern "C" fn roc_alloc(size: usize, _alignment: u32) -> *mut c_void {
-    libc::malloc(size)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn roc_realloc(
-    c_ptr: *mut c_void,
-    new_size: usize,
-    _old_size: usize,
-    _alignment: u32,
-) -> *mut c_void {
-    libc::realloc(c_ptr, new_size)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn roc_dealloc(c_ptr: *mut c_void, _alignment: u32) {
-    libc::free(c_ptr)
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 3 {
@@ -29,14 +9,27 @@ fn main() {
         std::process::exit(1);
     }
 
+    // the .roc script source file we want to compile and run
     let script_path = std::path::Path::new(&args[1]);
-    let host_path = std::path::Path::new(&args[2]);
+
+    // the host dylib was prebuilt with `zig build-lib -dynamic host/host.zig`
+    let host_dylib_path = std::path::Path::new(&args[2]);
+
+    // check host dylib exists
+    if !host_dylib_path.exists() {
+        eprintln!(
+            "ERROR: Unable to find host dylib at {}",
+            host_dylib_path.display()
+        );
+        std::process::exit(1);
+    }
 
     // the output from `roc build --lib`
-    let libscript = script_path.with_extension("dylib");
+    #[cfg(target_os = "linux")]
+    let libscript = script_path.with_extension("so");
 
-    // the output from `zig build-lib` linking the platform host
-    let libplugin = host_path.with_file_name("libplugin").with_extension("a");
+    #[cfg(target_os = "macos")]
+    let libscript = script_path.with_extension("dylib");
 
     println!(
         "INFO: Generating dylib from roc script {}",
@@ -55,33 +48,31 @@ fn main() {
         std::process::exit(1);
     }
 
-    println!(
-        "INFO: Linking {} with {} to provide roc required symbols",
-        script_path.display(),
-        host_path.display(),
-    );
+    let linked_dylib_path = host_dylib_path
+        .with_file_name("liblinked")
+        .with_extension("dylib");
 
-    // zig build-lib host/main.zig example-script.dylib
+    // link the host dylib and the script dylib to provide the roc required symbols like
+    // `roc_alloc`, `roc_realloc`, `roc_dealloc` -- this shouldn't be needed in the future
+    // when we have effect interepreters
     std::process::Command::new("zig")
         .arg("build-lib")
-        .arg("-lc") // link libc
-        .arg("-dynamic") // dynamic library
-        .arg(format!("-femit-bin={}", libplugin.to_str().unwrap()))
-        .arg(host_path.to_str().unwrap())
+        .arg("-dynamic")
+        .arg("-lc")
         .arg(libscript.to_str().unwrap())
+        .arg(host_dylib_path.to_str().unwrap())
+        .arg(format!(
+            "-femit-bin={}",
+            linked_dylib_path.to_str().unwrap()
+        ))
         .status()
         .unwrap();
 
-    // check libplugin exitsts
-    if !libplugin.exists() {
-        eprintln!("ERROR: Unable to find libplugin at {}", libplugin.display());
-        std::process::exit(1);
-    }
+    println!("INFO: Loading dylib from {}", linked_dylib_path.display());
+    let dylib = unsafe { Library::new(linked_dylib_path) }.unwrap();
 
-    println!("INFO: Loading dylib from {}", libplugin.display());
-    let dylib = unsafe { Library::new(libplugin) }.unwrap();
-
-    type MainForHost = unsafe extern "C" fn(*mut roc_std::RocStr);
+    // The platform API
+    type MainForHost = unsafe extern "C" fn(*mut roc_std::RocStr, u64);
 
     let main_for_host: libloading::Symbol<MainForHost> = unsafe {
         dylib
@@ -92,9 +83,31 @@ fn main() {
     };
 
     // allocate space for roc to write into
-    let mut roc_str = RocStr::from("Hello");
+    let mut roc_str = RocStr::empty();
 
-    unsafe { main_for_host(&mut roc_str) };
+    unsafe { main_for_host(&mut roc_str, 42) };
 
+    // let's just print the roc string we got back
     dbg!(roc_str);
+}
+
+// these are required for roc_std
+#[no_mangle]
+pub unsafe extern "C" fn roc_alloc(size: usize, _alignment: u32) -> *mut c_void {
+    libc::malloc(size)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn roc_realloc(
+    c_ptr: *mut c_void,
+    new_size: usize,
+    _old_size: usize,
+    _alignment: u32,
+) -> *mut c_void {
+    libc::realloc(c_ptr, new_size)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn roc_dealloc(c_ptr: *mut c_void, _alignment: u32) {
+    libc::free(c_ptr)
 }
