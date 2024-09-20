@@ -5,7 +5,7 @@ use roc_std::RocStr;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 3 {
-        eprintln!("Usage: {} <file_path> <host/main.zig>", args[0]);
+        eprintln!("Usage: {} <plugin.roc> <libhost.dylib>", args[0]);
         std::process::exit(1);
     }
 
@@ -48,6 +48,12 @@ fn main() {
         std::process::exit(1);
     }
 
+    #[cfg(target_os = "linux")]
+    let linked_dylib_path = host_dylib_path
+        .with_file_name("liblinked")
+        .with_extension("so");
+
+    #[cfg(target_os = "macos")]
     let linked_dylib_path = host_dylib_path
         .with_file_name("liblinked")
         .with_extension("dylib");
