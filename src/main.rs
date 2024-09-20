@@ -1,10 +1,10 @@
 use core::ffi::c_void;
 use libloading::Library;
-use roc_std::{RocList, RocStr};
+use roc_std::RocStr;
 
 #[no_mangle]
 pub unsafe extern "C" fn roc_alloc(size: usize, _alignment: u32) -> *mut c_void {
-    return libc::malloc(size);
+    libc::malloc(size)
 }
 
 #[no_mangle]
@@ -14,12 +14,12 @@ pub unsafe extern "C" fn roc_realloc(
     _old_size: usize,
     _alignment: u32,
 ) -> *mut c_void {
-    return libc::realloc(c_ptr, new_size);
+    libc::realloc(c_ptr, new_size)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn roc_dealloc(c_ptr: *mut c_void, _alignment: u32) {
-    return libc::free(c_ptr);
+    libc::free(c_ptr)
 }
 
 fn main() {
@@ -32,16 +32,11 @@ fn main() {
     let script_path = std::path::Path::new(&args[1]);
     let host_path = std::path::Path::new(&args[2]);
 
-    // the output from roc build --lib
+    // the output from `roc build --lib`
     let libscript = script_path.with_extension("dylib");
 
-    // the output from zig build-lib linking the host and libscript
-    let libplugin = host_path
-        .join("..")
-        .with_file_name("libplugin")
-        .with_extension("a");
-
-    dbg!(&libplugin);
+    // the output from `zig build-lib` linking the platform host
+    let libplugin = host_path.with_file_name("libplugin").with_extension("a");
 
     println!(
         "INFO: Generating dylib from roc script {}",
@@ -61,8 +56,9 @@ fn main() {
     }
 
     println!(
-        "INFO: Linking {} with host to provide roc required symbols",
-        script_path.display()
+        "INFO: Linking {} with {} to provide roc required symbols",
+        script_path.display(),
+        host_path.display(),
     );
 
     // zig build-lib host/main.zig example-script.dylib
